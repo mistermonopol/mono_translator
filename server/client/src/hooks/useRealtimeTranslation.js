@@ -12,16 +12,19 @@ const LANGUAGE_CODES = {
   "Mandarin Chinese": "zh",
 };
 
+const TRANSLATION_CALL_URL = "https://api.openai.com/v1/realtime/translations/calls";
+
 export function useRealtimeTranslation() {
   const [targetText, setTargetText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState(null);
   const pcRef = useRef(null);
   const mediaStreamRef = useRef(null);
-  const audioRef = useRef(null);
+  const translatedAudioRef = useRef(null);
 
   const stopStreaming = useCallback(() => {
     setIsStreaming(false);
+
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
@@ -30,28 +33,34 @@ export function useRealtimeTranslation() {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
     }
-    if (audioRef.current) {
-      audioRef.current.srcObject = null;
-      audioRef.current = null;
+    if (translatedAudioRef.current) {
+      translatedAudioRef.current.pause();
+      translatedAudioRef.current.srcObject = null;
+      translatedAudioRef.current = null;
     }
   }, []);
 
   const startStreaming = useCallback(
     async (sourceLanguage, targetLanguage) => {
       setError(null);
+      setTargetText("");
+
       try {
-        // 1. Get ephemeral client secret from our server
+        const langCode = LANGUAGE_CODES[targetLanguage] ?? targetLanguage.toLowerCase().slice(0, 2);
+
+        // 1. Create session server-side and get ephemeral client secret
         const res = await fetch("/api/translation/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sourceLanguage, targetLanguage }),
+          body: JSON.stringify({ targetLanguage: langCode }),
         });
+
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Session request failed (${res.status})`);
         }
+
         const { client_secret } = await res.json();
-        const token = typeof client_secret === "string" ? client_secret : client_secret.value;
 
         // 2. Request microphone access
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -61,40 +70,25 @@ export function useRealtimeTranslation() {
         const pc = new RTCPeerConnection();
         pcRef.current = pc;
 
-        // 4. Play translated audio output automatically
-        pc.ontrack = (event) => {
+        // 4. Play translated audio output when track arrives
+        pc.ontrack = ({ streams }) => {
           const audio = new Audio();
-          audio.srcObject = event.streams[0];
+          audio.autoplay = true;
+          audio.playsInline = true;
+          audio.srcObject = streams[0];
+          translatedAudioRef.current = audio;
           audio.play().catch(() => {});
-          audioRef.current = audio;
         };
 
-        // 5. Data channel receives transcript events
-        const dc = pc.createDataChannel("events");
+        // 5. Data channel receives transcript events (language already set in session)
+        const dc = pc.createDataChannel("oai-events");
 
-        dc.onopen = () => {
-          const langCode = LANGUAGE_CODES[targetLanguage] || targetLanguage.toLowerCase().slice(0, 2);
-          dc.send(
-            JSON.stringify({
-              type: "session.update",
-              session: {
-                audio: {
-                  input: { noise_reduction: { type: "near_field" } },
-                  output: { language: langCode },
-                },
-              },
-            })
-          );
-          setIsStreaming(true);
-        };
+        dc.onopen = () => setIsStreaming(true);
 
-        dc.onmessage = (event) => {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "session.output_transcript.delta") {
-            setTargetText((prev) => prev + msg.delta);
-          }
-          if (msg.type === "session.output_transcript.done") {
-            setTargetText((prev) => prev.trimEnd() + "\n");
+        dc.onmessage = ({ data }) => {
+          const event = JSON.parse(data);
+          if (event.type === "session.output_transcript.delta" && typeof event.delta === "string") {
+            setTargetText((prev) => prev + event.delta);
           }
         };
 
@@ -103,29 +97,29 @@ export function useRealtimeTranslation() {
           stopStreaming();
         };
 
-        // 6. Add microphone track to peer connection
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        // 6. Add microphone track
+        stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
 
-        // 7. Create and set local SDP offer
+        // 7. Create SDP offer and set as local description
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
         // 8. Exchange SDP with OpenAI to complete WebRTC handshake
-        const sdpRes = await fetch("https://api.openai.com/v1/realtime/translations/calls", {
+        const sdpRes = await fetch(TRANSLATION_CALL_URL, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${client_secret}`,
             "Content-Type": "application/sdp",
           },
           body: offer.sdp,
         });
 
+        const answerSdp = await sdpRes.text();
+
         if (!sdpRes.ok) {
-          const errText = await sdpRes.text();
-          throw new Error(`SDP exchange failed (${sdpRes.status}): ${errText}`);
+          throw new Error(`SDP exchange failed (${sdpRes.status}): ${answerSdp}`);
         }
 
-        const answerSdp = await sdpRes.text();
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       } catch (err) {
         setError(err.message);
