@@ -4,5 +4,8 @@
   "scripts": {
     "dev": "npm --prefix server/client run dev",
     "build": "npm --prefix server/client install && npm --prefix server/client run build"
+  },
+  "dependencies": {
+    "openai": "^4.70.1"
   }
 }
