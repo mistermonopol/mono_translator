@@ -35,6 +35,10 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error("Failed to create translation session", error);
-    res.status(500).json({ error: "Failed to create translation session." });
+    res.status(500).json({
+      error: error.message || "Failed to create translation session.",
+      status: error.status,
+      code: error.code,
+    });
   }
 }
