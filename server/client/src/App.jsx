@@ -17,7 +17,7 @@ const LANGUAGES = [
 export default function App() {
   const [sourceLanguage, setSourceLanguage] = useState('English');
   const [targetLanguage, setTargetLanguage] = useState('Spanish');
-  const { targetText, isStreaming, startStreaming, stopStreaming } = useRealtimeTranslation();
+  const { targetText, isStreaming, error, startStreaming, stopStreaming } = useRealtimeTranslation();
 
   const onToggle = async () => {
     if (isStreaming) {
@@ -91,6 +91,12 @@ export default function App() {
             </div>
           </div>
         </section>
+
+        {error && (
+          <div className="bg-red-900/50 border border-red-700 rounded-xl p-4 text-red-300 text-sm">
+            <strong>Error:</strong> {error}
+          </div>
+        )}
 
         <section className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 shadow-xl min-h-[260px]">
           <header className="flex items-center justify-between mb-4">
