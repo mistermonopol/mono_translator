@@ -1,42 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const BACKEND_URL = "";
+const LANGUAGE_CODES = {
+  "English": "en",
+  "Spanish": "es",
+  "French": "fr",
+  "German": "de",
+  "Italian": "it",
+  "Portuguese": "pt",
+  "Japanese": "ja",
+  "Korean": "ko",
+  "Mandarin Chinese": "zh",
+};
 
 export function useRealtimeTranslation() {
-  const [session, setSession] = useState(null);
   const [targetText, setTargetText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState(null);
-  const wsRef = useRef(null);
+  const pcRef = useRef(null);
   const mediaStreamRef = useRef(null);
-
-  const requestSession = useCallback(async (sourceLanguage, targetLanguage) => {
-    const response = await fetch(`${BACKEND_URL}/api/translation/session`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceLanguage, targetLanguage }),
-    });
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `Session request failed (${response.status})`);
-    }
-
-    const data = await response.json();
-    setSession(data);
-    return data;
-  }, []);
+  const audioRef = useRef(null);
 
   const stopStreaming = useCallback(() => {
     setIsStreaming(false);
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
     }
-    const stream = mediaStreamRef.current;
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.srcObject = null;
+      audioRef.current = null;
     }
   }, []);
 
@@ -44,89 +40,104 @@ export function useRealtimeTranslation() {
     async (sourceLanguage, targetLanguage) => {
       setError(null);
       try {
-        const sessionData = await requestSession(sourceLanguage, targetLanguage);
+        // 1. Get ephemeral client secret from our server
+        const res = await fetch("/api/translation/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourceLanguage, targetLanguage }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `Session request failed (${res.status})`);
+        }
+        const { client_secret } = await res.json();
+        const token = typeof client_secret === "string" ? client_secret : client_secret.value;
 
+        // 2. Request microphone access
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaStreamRef.current = stream;
 
-        const model = sessionData.model || "gpt-4o-mini-realtime-preview";
-        const wsUrl = `wss://api.openai.com/v1/realtime?model=${model}`;
-        const ws = new WebSocket(wsUrl, [
-          "realtime",
-          `openai-insecure-api-key.${sessionData.client_secret.value}`,
-          "openai-beta.realtime-v1",
-        ]);
-        wsRef.current = ws;
+        // 3. Create WebRTC peer connection
+        const pc = new RTCPeerConnection();
+        pcRef.current = pc;
 
-        ws.onopen = () => {
+        // 4. Play translated audio output automatically
+        pc.ontrack = (event) => {
+          const audio = new Audio();
+          audio.srcObject = event.streams[0];
+          audio.play().catch(() => {});
+          audioRef.current = audio;
+        };
+
+        // 5. Data channel receives transcript events
+        const dc = pc.createDataChannel("events");
+
+        dc.onopen = () => {
+          const langCode = LANGUAGE_CODES[targetLanguage] || targetLanguage.toLowerCase().slice(0, 2);
+          dc.send(
+            JSON.stringify({
+              type: "session.update",
+              session: {
+                audio: {
+                  input: { noise_reduction: { type: "near_field" } },
+                  output: { language: langCode },
+                },
+              },
+            })
+          );
           setIsStreaming(true);
-          const audioContext = new AudioContext({ sampleRate: 16000 });
-          const source = audioContext.createMediaStreamSource(stream);
-          const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-          source.connect(processor);
-          processor.connect(audioContext.destination);
-
-          processor.onaudioprocess = (event) => {
-            if (ws.readyState !== WebSocket.OPEN) return;
-            const inputBuffer = event.inputBuffer.getChannelData(0);
-            const pcmData = convertFloat32ToInt16(inputBuffer);
-            const uint8 = new Uint8Array(pcmData);
-            let binary = "";
-            for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
-            ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: btoa(binary) }));
-          };
-
-          ws.onmessage = (message) => {
-            const parsed = JSON.parse(message.data);
-            if (parsed.type === "response.created") {
-              setTargetText("");
-            }
-            if (parsed.type === "response.text.delta" || parsed.type === "response.audio_transcript.delta") {
-              setTargetText((prev) => prev + parsed.delta);
-            }
-          };
         };
 
-        ws.onerror = () => {
-          setError("WebSocket connection to OpenAI failed. Check browser console for details.");
-          stopStreaming();
-        };
-
-        ws.onclose = (event) => {
-          if (event.code !== 1000) {
-            setError(`Connection closed unexpectedly (code ${event.code}: ${event.reason || "no reason given"})`);
+        dc.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "session.output_transcript.delta") {
+            setTargetText((prev) => prev + msg.delta);
           }
+          if (msg.type === "session.output_transcript.done") {
+            setTargetText((prev) => prev.trimEnd() + "\n");
+          }
+        };
+
+        dc.onerror = () => {
+          setError("Data channel error — check browser console.");
           stopStreaming();
         };
+
+        // 6. Add microphone track to peer connection
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+        // 7. Create and set local SDP offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        // 8. Exchange SDP with OpenAI to complete WebRTC handshake
+        const sdpRes = await fetch("https://api.openai.com/v1/realtime/translations/calls", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/sdp",
+          },
+          body: offer.sdp,
+        });
+
+        if (!sdpRes.ok) {
+          const errText = await sdpRes.text();
+          throw new Error(`SDP exchange failed (${sdpRes.status}): ${errText}`);
+        }
+
+        const answerSdp = await sdpRes.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       } catch (err) {
         setError(err.message);
         stopStreaming();
       }
     },
-    [requestSession, stopStreaming],
+    [stopStreaming]
   );
 
   useEffect(() => {
     return () => stopStreaming();
   }, [stopStreaming]);
 
-  return {
-    session,
-    targetText,
-    isStreaming,
-    error,
-    startStreaming,
-    stopStreaming,
-  };
-}
-
-function convertFloat32ToInt16(buffer) {
-  const l = buffer.length;
-  const buf = new Int16Array(l);
-  for (let i = 0; i < l; i += 1) {
-    const s = Math.max(-1, Math.min(1, buffer[i]));
-    buf[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return buf.buffer;
+  return { targetText, isStreaming, error, startStreaming, stopStreaming };
 }

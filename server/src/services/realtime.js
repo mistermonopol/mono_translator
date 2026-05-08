@@ -1,26 +1,21 @@
-import OpenAI from "openai";
+export async function createTranslationSession() {
+  const response = await fetch(
+    "https://api.openai.com/v1/realtime/translations/client_secrets",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: "gpt-realtime-translate" }),
+    }
+  );
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `OpenAI returned ${response.status}`);
+  }
 
-export async function createTranslationSession({
-  sourceLanguage,
-  targetLanguage,
-}) {
-  const response = await client.realtime.sessions.create({
-    model: "gpt-4o-mini-realtime-preview",
-    voice: "verse",
-    modalities: ["text", "audio"],
-    input_audio_format: "pcm16",
-    output_audio_format: "pcm16",
-    instructions: `You are a live interpreter. Translate everything you hear from ${sourceLanguage} into ${targetLanguage}. Respond only with the translation — no explanations, no commentary.`,
-  });
-
-  return {
-    id: response.id,
-    expires_at: response.expires_at,
-    model: response.model,
-    client_secret: response.client_secret,
-    sourceLanguage,
-    targetLanguage,
-  };
+  const data = await response.json();
+  return { client_secret: data.client_secret };
 }
