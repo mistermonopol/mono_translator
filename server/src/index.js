@@ -16,7 +16,7 @@ app.use(express.json());
 
 app.use("/api/translation", translationRouter);
 
-const staticPath = path.join(__dirname, "../client/public");
+const staticPath = path.join(__dirname, "../client/dist");
 app.use(express.static(staticPath));
 
 app.get("*", (_req, res) => {

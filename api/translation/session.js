@@ -17,26 +17,12 @@ export default async function handler(req, res) {
     }
 
     const response = await client.realtime.sessions.create({
-      model: "gpt-4o-mini-translate",
+      model: "gpt-4o-mini-realtime-preview",
       voice: "verse",
       modalities: ["text", "audio"],
-      input_audio_format: {
-        codec: "pcm16",
-        sample_rate_hz: 16000,
-        channels: 1,
-      },
-      output_audio_format: {
-        codec: "mp3",
-        sample_rate_hz: 16000,
-        channels: 1,
-      },
-      defaults: {
-        text: {
-          response: {
-            instructions: `You are a live interpreter. Translate everything you hear from ${sourceLanguage} into ${targetLanguage}. Respond with concise, natural phrasing and include punctuation.`,
-          },
-        },
-      },
+      input_audio_format: "pcm16",
+      output_audio_format: "pcm16",
+      instructions: `You are a live interpreter. Translate everything you hear from ${sourceLanguage} into ${targetLanguage}. Respond only with the translation — no explanations, no commentary.`,
     });
 
     res.status(200).json({

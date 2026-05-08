@@ -47,8 +47,13 @@ export function useRealtimeTranslation() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
-      const wsUrl = sessionData.client_secret.value;
-      const ws = new WebSocket(wsUrl);
+      const model = sessionData.model || "gpt-4o-mini-realtime-preview";
+      const wsUrl = `wss://api.openai.com/v1/realtime?model=${model}`;
+      const ws = new WebSocket(wsUrl, [
+        "realtime",
+        `openai-insecure-api-key.${sessionData.client_secret.value}`,
+        "openai-beta.realtime-v1",
+      ]);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -64,16 +69,19 @@ export function useRealtimeTranslation() {
           if (ws.readyState !== WebSocket.OPEN) return;
           const inputBuffer = event.inputBuffer.getChannelData(0);
           const pcmData = convertFloat32ToInt16(inputBuffer);
-          ws.send(pcmData);
+          const uint8 = new Uint8Array(pcmData);
+          let binary = "";
+          for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+          ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: btoa(binary) }));
         };
 
         ws.onmessage = (message) => {
           const parsed = JSON.parse(message.data);
-          if (parsed.type === "response.output_text.delta") {
-            setTargetText((prev) => prev + parsed.delta);
-          }
-          if (parsed.type === "response.completed") {
+          if (parsed.type === "response.created") {
             setTargetText("");
+          }
+          if (parsed.type === "response.text.delta" || parsed.type === "response.audio_transcript.delta") {
+            setTargetText((prev) => prev + parsed.delta);
           }
         };
       };
