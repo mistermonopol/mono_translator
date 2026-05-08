@@ -2,16 +2,16 @@ import { useState } from 'react';
 import { Languages, Mic, Square, Volume2 } from 'lucide-react';
 import { useRealtimeTranslation } from './hooks/useRealtimeTranslation';
 
-const LANGUAGES = [
-  'English',
-  'Spanish',
-  'French',
-  'German',
-  'Italian',
-  'Portuguese',
-  'Japanese',
-  'Korean',
-  'Mandarin Chinese'
+const SOURCE_LANGUAGES = [
+  'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese',
+  'Japanese', 'Korean', 'Mandarin Chinese', 'Russian', 'Hindi',
+  'Indonesian', 'Vietnamese', 'Turkish',
+];
+
+const TARGET_LANGUAGES = [
+  'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese',
+  'Japanese', 'Korean', 'Mandarin Chinese', 'Russian', 'Hindi',
+  'Indonesian', 'Vietnamese',
 ];
 
 export default function App() {
@@ -49,7 +49,7 @@ export default function App() {
                 value={sourceLanguage}
                 onChange={(event) => setSourceLanguage(event.target.value)}
               >
-                {LANGUAGES.map((language) => (
+                {SOURCE_LANGUAGES.map((language) => (
                   <option key={language}>{language}</option>
                 ))}
               </select>
@@ -62,7 +62,7 @@ export default function App() {
                 value={targetLanguage}
                 onChange={(event) => setTargetLanguage(event.target.value)}
               >
-                {LANGUAGES.filter((language) => language !== sourceLanguage).map((language) => (
+                {TARGET_LANGUAGES.filter((language) => language !== sourceLanguage).map((language) => (
                   <option key={language}>{language}</option>
                 ))}
               </select>

@@ -10,6 +10,11 @@ const LANGUAGE_CODES = {
   "Japanese": "ja",
   "Korean": "ko",
   "Mandarin Chinese": "zh",
+  "Russian": "ru",
+  "Hindi": "hi",
+  "Indonesian": "id",
+  "Vietnamese": "vi",
+  "Turkish": "tr",
 };
 
 const TRANSLATION_CALL_URL = "https://api.openai.com/v1/realtime/translations/calls";
