@@ -1,25 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? '';
+const BACKEND_URL = "";
 
 export function useRealtimeTranslation() {
   const [session, setSession] = useState(null);
-  const [targetText, setTargetText] = useState('');
+  const [targetText, setTargetText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const wsRef = useRef(null);
   const mediaStreamRef = useRef(null);
 
   const requestSession = useCallback(async (sourceLanguage, targetLanguage) => {
     const response = await fetch(`${BACKEND_URL}/api/translation/session`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ sourceLanguage, targetLanguage })
+      body: JSON.stringify({ sourceLanguage, targetLanguage }),
     });
 
     if (!response.ok) {
-      throw new Error('Failed to create session');
+      throw new Error("Failed to create session");
     }
 
     const data = await response.json();
@@ -69,21 +69,21 @@ export function useRealtimeTranslation() {
 
         ws.onmessage = (message) => {
           const parsed = JSON.parse(message.data);
-          if (parsed.type === 'response.output_text.delta') {
+          if (parsed.type === "response.output_text.delta") {
             setTargetText((prev) => prev + parsed.delta);
           }
-          if (parsed.type === 'response.completed') {
-            setTargetText('');
+          if (parsed.type === "response.completed") {
+            setTargetText("");
           }
         };
       };
 
       ws.onerror = (err) => {
-        console.error('WebSocket error', err);
+        console.error("WebSocket error", err);
         stopStreaming();
       };
     },
-    [requestSession, stopStreaming]
+    [requestSession, stopStreaming],
   );
 
   useEffect(() => {
@@ -95,7 +95,7 @@ export function useRealtimeTranslation() {
     targetText,
     isStreaming,
     startStreaming,
-    stopStreaming
+    stopStreaming,
   };
 }
 

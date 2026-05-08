@@ -1,0 +1,8 @@
+{
+  "name": "mono-translator",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix server/client run dev",
+    "build": "npm --prefix server/client install && npm --prefix server/client run build"
+  }
+}
